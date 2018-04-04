@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <title>SPA on AWS!!</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="">
+    <meta name="author" content="">
+
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+    <script src="https://sdk.amazonaws.com/js/aws-sdk-2.213.1.min.js"></script>
+    <!-- <script src="./aws-amp/packages/amazon-cognito-identity-js/dist/amazon-cognito-identity.min.js"></script> -->
+    <!-- <script src="./aws-amp/packages/aws-amplify/dist/aws-amplify.min.js"></script> -->
+    <script src="./aws/dist/aws-cognito-sdk.min.js"></script>
+    <script src="./aws/dist/amazon-cognito-identity.min.js"></script>
+  </head>
+
+  <body>
+
+    <div class="container">
+      <h1>Simple SPA with AWS!!</h1>
+      <div class="col-md-4 left-box">
+        <p>簡単なSPAをAWSで作ってみたよ</p>
+
+        <div id="loginBox" class="row">
+          <div class="panel panel-default">
+            <div class="panel-body">
+              <form>
+                <div class="form-group">
+                  <label for="exampleInputEmail1">Email address</label>
+                  <input type="email" class="form-control" id="exampleInputEmail1" placeholder="Email" value="">
+                </div>
+                <div class="form-group">
+                  <label for="exampleInputPassword1">Password</label>
+                  <input type="password" class="form-control" id="exampleInputPassword1" placeholder="Password" value="">
+                </div>
+                <button type="button" class="btn btn-default loginButton">ログイン</button>
+              </form>
+            </div> <!-- /panel -->
+          </div> <!-- /col -->
+        </div> <!-- /#loginBox.row -->
+
+
+        <div id="tweetBox" class="row">
+          <div class="">
+            <form>
+              <div class="form-group">
+                <label for="message">Password</label>
+                <textarea class="form-control" id="messageBox" placeholder="some message here."></textarea>
+              </div>
+              <div class="form-group">
+                <label for="exampleInputFile">File input</label>
+                <input type="file" accept="image/*" id="exampleInputFile">
+                <p class="help-block">Example block-level help text here.</p>
+              </div>
+              <button type="button" class="btn btn-default submitButton">Submit</button>
+            </form>
+          </div> <!-- /col -->
+        </div> <!-- /#tweetBox.row -->
+
+      </div> <!-- /left box -->
+    </div> <!-- /container -->
+
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
+
+    <script>
+
+var user_credentials;
+var identity_id;
+// AWS service init
+var aws_region = 'ap-northeast-1';
+var user_pool_id = "user pool id";
+var user_pool_application_id = "user pool application id";
+
+var identity_pool_id = "identity pool id";
+
+
+var dynamo;
+
+var s3;
+
+// Initialize the Amazon Cognito credentials provider
+AWS.config.region = aws_region; // Region
+
+// Initialize the Amazon Cognito credentials provider
+AWSCognito.config.region = aws_region; // Region
+AWSCognito.config.credentials = new AWS.CognitoIdentityCredentials({
+  IdentityPoolId: identity_pool_id,
+});
+AWSCognito.config.update({accessKeyId: 'anything', secretAccessKey: 'anything'});
+
+
+
+
+// event
+$('.loginButton').on('click', function () {
+  // console.log("hoge");
+  var this_obj = this;
+  $(this_obj).prop("disabled", true);
+
+  // login
+  var client = new AWSCognito.CognitoIdentityServiceProvider();
+  var params = {
+    AuthFlow: "USER_PASSWORD_AUTH", /* required */
+    ClientId: user_pool_application_id, /* required */
+    AuthParameters: {
+      "USERNAME": $('#exampleInputEmail1').val(),
+      "PASSWORD": $('#exampleInputPassword1').val(),
+    },
+  };
+
+  var tokens;
+  client.initiateAuth(params, function(err, data) {
+    if (err) {
+      console.log(err, err.stack); // an error occurred
+      alert(err.message); // an error occurred
+      $(this_obj).prop("disabled", false);
+    }
+    else {
+      console.log(data);           // successful response
+      tokens = data;
+
+      var cognitoidentity = new AWS.CognitoIdentity();
+
+      var ci_params = {
+        IdentityPoolId: identity_pool_id, /* required */
+        Logins: {
+          'cognito-idp.ap-northeast-1.amazonaws.com/ cognito identity pool id': tokens.AuthenticationResult.IdToken,
+        }
+      };
+
+      // get fed. user id
+      var uid;
+      cognitoidentity.getId(ci_params, function(err, data) {
+        if (err) console.log(err, err.stack); // an error occurred
+        else {
+          console.log(data);           // successful response
+          identity_id = uid = data.IdentityId;
+
+          // get cred.
+          var params = {
+            IdentityId: uid, /* required */
+            Logins: {
+              'cognito-idp.ap-northeast-1.amazonaws.com/ cognito identity pool id': tokens.AuthenticationResult.IdToken,
+            }
+          };
+          cognitoidentity.getCredentialsForIdentity(params, function(err, data) {
+            if (err) console.log(err, err.stack); // an error occurred
+            else {
+              console.log(data);           // successful response
+
+              user_credentials = data.Credentials;
+              alert('ログインしました。');
+              $('#loginBox').toggle(1000);
+
+              // get dynamo client
+              dynamo = new AWS.DynamoDB({
+                accessKeyId:     user_credentials.AccessKeyId,
+                secretAccessKey: user_credentials.SecretKey,
+                sessionToken:    user_credentials.SessionToken,
+              });
+              console.log(dynamo);
+
+              // get s3 client
+              s3 = new AWS.S3({
+                accessKeyId:     user_credentials.AccessKeyId,
+                secretAccessKey: user_credentials.SecretKey,
+                sessionToken:    user_credentials.SessionToken,
+              });
+              console.log(s3);
+            }
+          });
+        }
+      });
+    }
+  });
+});
+
+
+$(".submitButton").on('click', function () {
+  var message = $('#messageBox').val();
+
+  // message required
+  if (message == "") {
+    console.log('empty text');
+    return;
+  }
+
+  // file is present
+  var file = $("#exampleInputFile").prop("files")[0];
+  var is_file_present = (typeof file !== 'undefined');
+
+
+
+  if (is_file_present) {
+    // put to S3
+    var timestamp = new Date().getTime();
+    var filename = "cognito/aws_spa/" + identity_id + "/" + "file" + timestamp + ".jpg";
+
+    var params = {
+      Body: file, 
+      ContentType: file.type,
+      Bucket: "aws-spa-test", 
+      Key: filename,
+      ACL: 'public-read',
+    };
+    s3.putObject(params, function(err, data) {
+      if (err) {
+        alert(err.message);
+        console.log(err, err.stack); // an error occurred
+        return;
+      }
+      else     console.log(data);           // successful response
+      /*
+        data = {
+          ETag: "\"6805f2cfc46c0f04559748bb039d69ae\"", 
+          VersionId: "Bvq0EDKxOcXLJXNo_Lkz37eM3R4pfzyQ"
+        }
+        */
+    });
+  }
+
+
+  // push to dynamo
+  var params = {
+    Item: {
+      "user_id": {S: identity_id}, 
+      "created_at": {N: String(+new Date())}, 
+      "message": {S: message},
+    }, 
+    ReturnConsumedCapacity: "TOTAL", 
+    TableName: "spa_sample"
+  };
+
+  // with file
+  if (is_file_present) params.Item.file = {S: filename};
+
+  dynamo.putItem(params, function(err, data) {
+    if (err) console.log(err, err.stack); // an error occurred
+    else     console.log(data);           // successful response
+    /*
+   data = {
+    ConsumedCapacity: {
+     CapacityUnits: 1, 
+     TableName: "Music"
+    }
+   }
+     */
+  });
+
+
+});
+    </script>
+
+  </body>
+</html>
+
+
